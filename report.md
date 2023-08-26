@@ -9,6 +9,8 @@
 3. [Part 3. iperf3 utility. Утилита iperf3](#part-3-iperf3-utility)
 4. [Part 4. Network firewall. Сетевой экран](#part-4-network-firewall)
 5. [Part 5. Static network routing. Статическая маршрутизация сети](#part-5-static-network-routing)
+6. [Part 6. Dynamic IP configuration using DHCP. Динамическая настройка IP с помощью DHCP](#part-6-dynamic-ip-configuration-using-dhcp)
+7.[Part 7. NAT](#part-7-nat)
 
 ## Part 1. ipcalc tool 
 ### Инструмент ipcalc
@@ -546,6 +548,10 @@ $ sudo tcpdump -tn -i eth1
 
 > `tcpdump` - позволяет просматривать все входящие и исходящие из определенного интерфейса пакеты.
 
+> `-i` - интерфейс
+> `-t` - не отображать доменные имена
+> `-n` - не отображать временную метку
+
 r2:
 ![5.25 r2 tcpdump](pics/5.25%20r2%20tcpdump.png)
 
@@ -585,6 +591,7 @@ $ ip r list 10.10.0.0/[маска сети] и ip r list 0.0.0.0/0
 ```c
 $ sudo tcpdump -tnv -i eth0
 ```
+> `-v` - более подробный вывод
 
 r1:
 ![5.33 r1 tcpdump](pics/5.33%20r1%20tcpdump.png)
@@ -592,3 +599,183 @@ r1:
 ws11:
 ![5.32 ws11 traceroute](pics/5.32%20ws11%20traceroute.png)
 
+Можем увидеть, что пакет прошел через 3 узла перед тем, как дойти до цели.
+
+Каждый пакет проходит на своем пути определенное количество узлов, пока достигнет своей цели. Причем, каждый пакет имеет свое время жизни. Это количество узлов, которые может пройти пакет перед тем, как он будет уничтожен. Этот параметр записывается в заголовке TTL, каждый маршрутизатор, через который будет проходить пакет уменьшает его на единицу. При TTL=0 пакет уничтожается, а отправителю отсылается сообщение Time Exceeded.Команда traceroute linux использует UDP пакеты. Она отправляет пакет с TTL=1 и смотрит адрес ответившего узла, дальше TTL=2, TTL=3 и так пока не достигнет цели. Каждый раз отправляется по три пакета и для каждого из них измеряется время прохождения. Пакет отправляется на случайный порт, который, скорее всего, не занят. Когда утилита traceroute получает сообщение от целевого узла о том, что порт недоступен трассировка считается завершенной.
+
+- ### 5.6. Использование протокола ICMP при маршрутизации
+#### `Запустить на r1 перехват сетевого трафика, проходящего через eth0 с помощью команды:`
+
+```c
+$ sudo tcpdump -n -i eth0 icmp
+```
+> `icmp` Internet Control Message Protocol 
+
+#### `Пропинговать с ws11 несуществующий IP (например, 10.30.0.111) с помощью команды:`
+
+```c
+$ ping -c 1 10.30.0.111
+```
+ws11:
+![5.35 ws11 ping](pics/5.35%20ws11%20ping.png)
+
+r1:
+![5.34 r1 tcpdump](pics/5.34%20r1%20tcpdump.png)
+
+Видим, что был перехвачен 1 пакет.
+
+## Part 6. Dynamic IP configuration using DHCP
+### Динамическая настройка IP с помощью DHCP
+
+#### 1) `Для r2 настроить в файле /etc/dhcp/dhcpd.conf конфигурацию службы DHCP. указать адрес маршрутизатора по-умолчанию, DNS-сервер и адрес внутренней сети.`
+
+```c
+$ sudo apt-get install ics-dhcp-server
+```
+Для начала определим сетевые интерфейсы и пропишем их в конфигурационный файл:
+
+```c
+$ sudo vim /etc/default/isc-dhcp-server
+```
+
+![5.36 r2 interfaces config](pics/5.36%20r2%20interfaces%20config.png)
+
+Теперь нужно отредактировать dhcpd.conf. Укажем адрес маршрутизатора по-умолчанию, DNS-сервер и адрес внутренней сети, диапазон IP адресов:
+
+```c
+$ sudo vim /etc/dhcp/dhcpd.conf
+```
+![5.37 r2 dhcp config](pics/5.37%20r2%20dhcp%20config.png)
+
+#### 2) `В файле resolv.conf прописать nameserver 8.8.8.8.`
+
+Файл resolv.conf содержит адреса серверов имен, к которым система имеет доступ.
+
+```c
+$ sudo vim /etc/resolv.conf
+```
+
+![5.38 r2 nemeserver](pics/5.38%20r2%20nemeserver.png)
+
+`Перезагрузить службу DHCP командой systemctl restart isc-dhcp-server. Машину ws21 перезагрузить при помощи reboot и через ip a показать, что она получила адрес. Также пропинговать ws22 с ws21.`
+
+![5.39 r2 dhcp restart](pics/5.39%20r2%20dhcp%20restart.png)
+
+Изменим настройки машин ws21 и ws22 в файле конфигурации, чтобы сделать протокол DHCP активным.
+
+```c
+$ sudo vim /etc/netplan/00-installer-config.yaml
+$ sudo netplan apply
+```
+
+ws21:
+![5.40 ws21 netplan config](pics/5.40%20ws21%20netplan%20config.png)
+
+ws22:
+![5.41 ws22 netplan config](pics/5.41%20ws22%20netplan%20config.png)
+
+Перезагружаем ws11 с помощью reboot и проверяем получила ли машина адрес.
+
+```c
+$ reboot
+$ ip a
+```
+
+![5.42 ws21 ip a](pics/5.42%20ws21%20ip%20a.png)
+
+Пропингуем ws21 с ws22 по новому адресу, заданному dhcp.
+
+![5.43 ws22 ping](pics/5.43%20ws22%20ping.png)
+
+Пинг проходит.
+
+#### `Указать MAC адрес у ws11, для этого в etc/netplan/00-installer-config.yaml надо добавить строки: macaddress: 10:10:10:10:10:BA, dhcp4: true.`
+
+```c
+$ sudo vim /etc/netplan/00-installer-config.yaml
+$ sudo netplan apply
+```
+
+ws11:
+![5.44 ws11 netplan config](pics/5.44%20ws11%20netplan%20config.png)
+
+`Для r1 настроить аналогично r2, но сделать выдачу адресов с жесткой привязкой к MAC-адресу (ws11). Провести аналогичные тесты.`
+
+Настроим mac-адрес для ws11 в virtual box.
+
+![5.45 ws11 mac address](pics/5.45%20ws11%20mac%20address.png)
+
+Теперь настроим r1.
+
+```c
+$ sudo apt-get install ics-dhcp-server
+```
+Для начала определим сетевые интерфейсы и пропишем их в конфигурационный файл:
+
+```c
+$ sudo vim /etc/default/isc-dhcp-server
+```
+![5.46 r1 interfaces config](pics/5.46%20r1%20interfaces%20confg.png)
+
+Теперь нужно отредактировать dhcpd.conf. Укажем адрес маршрутизатора по-умолчанию, DNS-сервер и адрес внутренней сети, диапазон IP адресов. Для жесткой привязки IP-MAC прямо в секции Subnet следует добавить описания хостов.
+
+```c
+$ sudo vim /etc/dhcp/dhcpd.conf
+```
+![5.47 r1 dhcp config](pics/5.47%20r1%20dhcp%20config.png)
+
+Пропишем в файле resolv.conf прописать nameserver 8.8.8.8.
+
+```c
+$ sudo vim /etc/resolv.conf
+```
+
+![5.48 r1 nameserver](pics/5.48%20r1%20nameserver.png)
+
+Перезагрузим службу DHCP командой:
+
+```c
+$ systemctl restart isc-dhcp-server
+```
+
+![5.49 r1 dhcp restart](pics/5.49%20r1%20dhcp%20restart.png)
+
+Перезагрузим ws11 при помощи reboot и через ip a покажем, что она получила адрес.
+
+```c
+$ reboot
+$ ip a
+```
+
+![5.50 ws11 ip a](pics/5.50%20ws11%20ip%20a.png)
+
+Видим, что машина получила адрес, который мы задали в dhcpd.conf.
+
+Пропингуем ws11 с r1. Видим, что пинг проходит.
+
+![5.51 r1 ping](pics/5.51%20r1%20ping.png)
+
+#### `Запросить с ws21 обновление ip адреса.`
+
+Запросим с ws21 обновление ip адреса с помощью команды:
+```c
+$ sudo dhclient -v
+```
+> `dhclient` - запросить ip-адрес
+
+> `-v` - будет выведена дополнительная информация
+
+![5.53 ws21 dhclient](pics/5.53%20ws21%20dhclient.png)
+
+ws21 ip до:
+![5.52 ws21 ip a](pics/5.52%20ws21%20ip%20a.png)
+
+ws21 ip после:
+![5.54 ws21 ip a](pics/5.54%20ws21%20ip%20a.png)
+
+## Part 7. NAT
+#### `В файле /etc/apache2/ports.conf на ws22 и r1 изменить строку Listen 80 на Listen 0.0.0.0:80, то есть сделать сервер Apache2 общедоступным.`
+
+
+
+#### `Запустить веб-сервер Apache командой service apache2 start на ws22 и r1.`
