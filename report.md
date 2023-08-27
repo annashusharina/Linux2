@@ -10,7 +10,8 @@
 4. [Part 4. Network firewall. Сетевой экран](#part-4-network-firewall)
 5. [Part 5. Static network routing. Статическая маршрутизация сети](#part-5-static-network-routing)
 6. [Part 6. Dynamic IP configuration using DHCP. Динамическая настройка IP с помощью DHCP](#part-6-dynamic-ip-configuration-using-dhcp)
-7.[Part 7. NAT](#part-7-nat)
+7. [Part 7. NAT](#part-7-nat)
+8. [Bonus. Introduction to SSH Tunnels. Дополнительно. Знакомство с SSH Tunnels](#part-8-bonus-introduction-to-ssh-tunnels)
 
 ## Part 1. ipcalc tool 
 ### Инструмент ipcalc
@@ -322,6 +323,7 @@ $ iperf3 -c 192.168.100.10
 $ sudo apt install iptables
 ```
 Созадем файл /etc/firewall.sh:
+
 ```c
 $ sudo touch /etc/firewall.sh
 ```
@@ -375,8 +377,8 @@ ws2:
 
 Делаем файл исполняемым, запускаем и проверяем, пингуются ли машины между собой:
 ```c
-$ sudo chmod +x firewall.sh
-$ sudo sh firewall.sh
+$ sudo chmod +x /etc/firewall.sh
+$ sudo sh /etc/firewall.sh
 $ ping <address>
 ```
 
@@ -580,7 +582,7 @@ $ ip r list 10.10.0.0/[маска сети] и ip r list 0.0.0.0/0
 
 ![5.31 ws11 ip r list](pics/5.31%20ws11%20ip%20r%20list.png)
 
-Для адреса 10.10.0.0/18 был выбран маршрут, отличный от 0.0.0.0/0 (он попадает под маршрут по-умолчанию), т.к. машина ws11 соединена с сетью 10.10.0.0/18 по своему IP-адресу 10.10.0.2.
+Для адреса 10.10.0.0/18 был выбран маршрут, отличный от 0.0.0.0/0 (он попадает под маршрут по-умолчанию), т.к. машина 10.10.0.0/18 имеет более длинную маску, поэтому был выбран этот маршрут, а не маршрут по умолчанию.
 
 - ### 5.5. Построение списка маршрутизаторов
 
@@ -776,6 +778,135 @@ ws21 ip после:
 ## Part 7. NAT
 #### `В файле /etc/apache2/ports.conf на ws22 и r1 изменить строку Listen 80 на Listen 0.0.0.0:80, то есть сделать сервер Apache2 общедоступным.`
 
+```c
+$ sudo apt install apache2
+$ sudo vim /etc/apache2/ports.conf
+```
 
+ws22:
+![5.55 ws22 apache config](pics/5.55%20ws22%20apache%20config.png)
+
+r1:
+![5.56 r1 apache config](pics/5.56%20r1%20apache%20config.png)
 
 #### `Запустить веб-сервер Apache командой service apache2 start на ws22 и r1.`
+
+ws22:
+![5.57 ws22 apache start](pics/5.57%20ws22%20apache%20start.png)
+
+r1:
+![5.58 r1 apache start](pics/5.58%20r1%20apache%20start.png)
+
+#### `Добавить в фаервол, созданный по аналогии с фаерволом из Части 4, на r2 следующие правила:`
+
+#### 1) `удаление правил в таблице filter - iptables -F`
+
+#### 2) `удаление правил в таблице "NAT" - iptables -F -t nat`
+
+#### 3) `отбрасывать все маршрутизируемые пакеты - iptables --policy FORWARD DROP`
+
+Устанавливаем утилиту iptables, открываем файл, добавляем правила и делаем файл исполняемым.
+
+```c
+$ sudo apt install iptables
+$ sudo vim /etc/firewall.sh
+$ sudo chmod +x /etc/firewall.sh
+$ sudo sh /etc/firewall.sh
+```
+
+r2:
+![5.59 r2 firewall](pics/5.59%20r2%20firewall.png)
+
+![5.60 r2 sh firewall](pics/5.60%20r2%20sh%20firewall.png)
+
+#### `Проверить соединение между ws22 и r1 командой ping. При запуске файла с этими правилами, ws22 не должна "пинговаться" с r1.`
+
+ws22:
+![5.61 ws22 ping](pics/5.61%20ws22%20ping.png)
+
+Видим, что машины не пингуются.
+
+#### `Добавить в файл ещё одно правило:`
+
+#### 4) `разрешить маршрутизацию всех пакетов протокола ICMP`
+
+#### `Проверить соединение между ws22 и r1 командой ping. При запуске файла с этими правилами, ws22 должна "пинговаться" с r1.`
+
+r1:
+![5.62 r2 firewall config](pics/5.62%20r2%20firewall%20config.png)
+
+Пингуем ws22 с r1:
+![5.64 ws22 ping](pics/5.64%20ws22%20ping.png)
+
+Видим, что пинг проходит.
+
+#### `Добавить в файл ещё два правила:`
+
+#### 5) `включить SNAT, а именно маскирование всех локальных ip из локальной сети, находящейся за r2 (по обозначениям из Части 5 - сеть 10.20.0.0)`
+
+#### 6) `включить DNAT на 8080 порт машины r2 и добавить к веб-серверу Apache, запущенному на ws22, доступ извне сети`
+
+![5.65 r2 firewall](pics/5.65%20r2%20firewall.png)
+
+#### `Проверить соединение по TCP для SNAT, для этого с ws22 подключиться к серверу Apache на r1 командой:`
+
+```c
+$ telnet [адрес] [порт]
+```
+
+> `Команда telnet используется для связи с другим хостом по протоколу TELNET.`
+
+![5.66 ws22 telnet](pics/5.66%20ws22%20telnet.png)
+
+#### `Проверить соединение по TCP для DNAT, для этого с r1 подключиться к серверу Apache на ws22 командой telnet (обращаться по адресу r2 и порту 8080).`
+
+При этой проверке следует отключить на ws22 автоматическую выдачу ip enp0s3.
+
+![5.67 ws22 netplan config](pics/5.67%20ws22%20netplan%20config.png)
+
+![5.68 r1 telnet](pics/5.68%20r1%20telnet.png)
+
+## Part 8. Bonus. Introduction to SSH Tunnels
+### Дополнительно. Знакомство с SSH Tunnels
+
+#### `Запустить на r2 фаервол с правилами из Части 7. Запустить веб-сервер Apache на ws22 только на localhost (то есть в файле /etc/apache2/ports.conf изменить строку Listen 80 на Listen localhost:80)`
+
+ws22:
+![5.69 ws22 localhost port](pics/5.69%20ws22%20localhost%20port.png)
+
+![5.71 ws22 apache start](pics/5.71%20ws22%20apache%20start.png)
+
+#### `Воспользоваться Local TCP forwarding с ws21 до ws22, чтобы получить доступ к веб-серверу на ws22 с ws21.`
+
+Создаём соединение. Запускаем на машине ws22:
+
+```c
+$ ssh -p 2022 10.20.0.2
+```
+ws22:
+![5.70 ssh connect](pics/5.70%20ws22%20ssh%20connect.png)
+
+Оставаясь на машине ws22, устанавливаем соединение с сервером ws22 от машины ws21.
+
+![5.72 ws22 ssh L](pics/5.72%20ws22%20ssh%20L.png)
+
+![5.73 ws22 ssh L output](pics/5.73%20ws22%20ssh%20L%20output.png)
+
+На машине ws21 запускаем утилиту telnet:
+```c
+$ telnet 127.0.0.1 8080
+```
+
+![5.78 ws21 telnet](pics/5.78%20ws21%20telnet.png)
+
+```c
+$ exit
+```
+
+
+
+
+
+
+
+
